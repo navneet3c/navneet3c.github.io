@@ -1,0 +1,54 @@
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+body {
+	font: 24px "Helvetica Neue", Helvetica, Arial, sans-serif;
+	background: #eeeeee;
+	color: #333333;
+	-webkit-font-smoothing: antialiased;
+}
+.main-div {
+    padding: 50px;
+    text-align: center;
+}
+.main-link {
+    text-decoration: none;
+    color: white;
+    cursor: pointer;
+    background: lightpink;
+    padding: 20px 50px;
+    vertical-align: middle;
+}
+#graph-main-div {
+    background: linear-gradient(90deg, #ffffff 19px, transparent 1%) center, linear-gradient(#ffffff 19px, transparent 1%) center, #000000;
+    background-size: 20px 20px;
+    width: 400px;
+    height: 400px;
+    background-position: top left;
+}
+#graph-sidebar {
+    position: fixed;
+    right: 0px;
+    top: 0px;
+}
+.graph-sidebar-item {
+    font: 12px sans-serif;
+    padding: 6px 12px;
+    background-color: beige;
+    width: 30px;
+    margin: 10px 0px;
+    display: block;
+    text-align: center;
+    border: 1px solid black;
+    cursor: pointer;
+}
+#graph-lines-svg {
+    width: 100%;
+    height: 100%;
+}
+.graph-node, .graph-line {
+    position: absolute;
+    cursor: all-scroll;
+}
