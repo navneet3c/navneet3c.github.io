@@ -65,7 +65,8 @@ $(function () {
         tagName: "div",
         className: "graph-node",
         events: {
-            "mousedown": "mouseDownHandler"
+            "mousedown": "mouseDownHandler",
+            "touchstart": "mouseDownHandler"
         },
         initialize: function () {
             this.listenTo(this.model, 'change', this.render);
@@ -89,7 +90,9 @@ $(function () {
             this.dragRelPosY = e.clientY;
             this.delegateEvents($.extend(this.events, {
                 "mouseup": "closeDragElement",
-                "mousemove": "elementDrag"
+                "mousemove": "elementDrag",
+                "touchend": "closeDragElement",
+                "touchmove": "elementDrag"
             }))
 
         },
@@ -97,6 +100,7 @@ $(function () {
             var posX, posY, offset;
             e = e || window.event;
             e.preventDefault();
+            e = (e.changedTouches && e.changedTouches[0]) || e;
             // calculate the new cursor position:
             posX = this.dragRelPosX - e.clientX;
             posY = this.dragRelPosY - e.clientY;
@@ -112,7 +116,10 @@ $(function () {
             var posX, posY, offset;
             this.$el.off("mouseup")
             this.$el.off("mousemove")
+            this.$el.off("touchend")
+            this.$el.off("touchmove")
 
+            e = (e.changedTouches && e.changedTouches[0]) || e;
             posX = this.dragRelPosX - e.clientX;
             posY = this.dragRelPosY - e.clientY;
             offset = this.$el.offset()
@@ -125,14 +132,13 @@ $(function () {
     }),
         GraphLineView = Backbone.View.extend({
             events: {
-                "mousedown": "mouseDownHandler"
             },
             className: "graph-line",
             preinitialize: function (options) {
                 _.extend(this, _.pick(options, ["svgElement"]));
             },
             _createElement: function (tagName) {
-                var arrow = this.svgElement.polygon([5,0,0,2,5,4,5,0]).attr({ fill: '#000' });
+                var arrow = this.svgElement.polygon([5, 0, 0, 2, 5, 4, 5, 0]).attr({ fill: '#000' });
                 var marker = arrow.marker(0, 0, 5, 4, 1, 2); //(x, y, width, height, refX, refY) 
                 return this.svgElement.line(0, 0, 0, 0).attr({
                     stroke: "black",
@@ -153,6 +159,9 @@ $(function () {
                 this.listenTo(this.model, 'destroy', this.remove);
 
                 this.el.drag(this.elementDrag, this.dragStartHandler, this.closeDragElement, this, this, this);
+                this.el.touchstart(this.dragStartHandler, this)
+                this.el.touchmove(this.elementDrag, this)
+                this.el.touchend(this.closeDragElement, this)
             },
             render: function () {
                 this.el.attr({
@@ -180,7 +189,13 @@ $(function () {
                     xLen = Math.abs(x2 - x1),
                     yLen = Math.abs(y2 - y1),
                     grabMargin = 30;
-
+                
+                    if( (typeof startX == 'object') && ( startX.type == 'touchstart') ) {
+                        startX.preventDefault();
+                        e = startX.changedTouches[0]
+                        startX = e.clientX
+                        startY = e.clientY
+                    }
                 if (yLen > xLen) {
                     var y1Dist = Math.abs(y1 - startY),
                         y2Dist = Math.abs(y2 - startY);
@@ -201,7 +216,12 @@ $(function () {
                 this.dragStartX = e.clientX
                 this.dragStartY = e.clientY
             },
-            elementDrag: function (dx, dy, posX, posY) {
+            elementDrag: function (dx, dy, posX, posY, e) {
+                if( (typeof dx == 'object') && ( dx.type == 'touchmove') ) {
+                    e = dx.changedTouches[0]
+                    dx = e.clientX - this.dragStartX
+                    dy = e.clientY - this.dragStartY
+                }
                 switch (this.dragAnchor) {
                     case 0:
                         this.el.attr({
@@ -230,6 +250,8 @@ $(function () {
                     y1 = this.model.attributes.y1Coord,
                     x2 = this.model.attributes.x2Coord,
                     y2 = this.model.attributes.y2Coord;
+
+                e = (e.changedTouches && e.changedTouches[0]) || e;
                 switch (this.dragAnchor) {
                     case 0:
                         x1 = this.roundNearest10(x1 + e.clientX - this.dragStartX)
