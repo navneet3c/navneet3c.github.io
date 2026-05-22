@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'preact/hooks';
 import { exportData, downloadJson, importData, uploadToGoogleDrive, getGoogleClientId } from '../../lib/backup.js';
 import { setSetting } from '../../db/schema.js';
+import { seedDemoData } from '../../lib/seed.js';
 
 export function BackupView() {
   const [clientId, setClientId] = useState('');
@@ -47,6 +48,26 @@ export function BackupView() {
     setStatus('Google Client ID saved.');
   };
 
+  const handleLoadDemo = async () => {
+    if (
+      !confirm(
+        'Add demo supplies, bills, and dining? Existing data is kept; new random-ish entries are appended.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus('');
+    try {
+      const { supplies, bills, dining } = await seedDemoData();
+      setStatus(`Loaded demo data: ${supplies} supplies, ${bills} bills, ${dining} dining.`);
+    } catch (e) {
+      setStatus(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDriveUpload = async () => {
     setBusy(true);
     setStatus('');
@@ -68,6 +89,17 @@ export function BackupView() {
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0;">
         All data stays in your browser (IndexedDB). Backups exclude photos to keep files small.
       </p>
+
+      <div class="card" style="margin: 1rem 0;">
+        <h2 style="margin: 0 0 0.75rem; font-size: 1rem;">Demo data</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.75rem;">
+          Empty database loads sample supplies and bills on first visit. Use this to add more test
+          entries anytime.
+        </p>
+        <button type="button" class="btn btn-ghost" onClick={handleLoadDemo} disabled={busy}>
+          Load demo data
+        </button>
+      </div>
 
       <div class="card" style="margin: 1rem 0;">
         <h2 style="margin: 0 0 0.75rem; font-size: 1rem;">Local backup</h2>

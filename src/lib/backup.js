@@ -1,9 +1,10 @@
 import { db, getSetting } from '../db/schema.js';
 
 export async function exportData() {
-  const [supplies, bills, settings] = await Promise.all([
+  const [supplies, bills, dining, settings] = await Promise.all([
     db.supplies.toArray(),
     db.bills.toArray(),
+    db.dining.toArray(),
     db.settings.toArray(),
   ]);
 
@@ -14,10 +15,11 @@ export async function exportData() {
 
   return {
     app: 'HomeRow',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     supplies: sanitizedSupplies,
     bills,
+    dining,
     settings,
   };
 }
@@ -36,12 +38,14 @@ export async function importData(payload) {
   if (!payload || payload.app !== 'HomeRow') {
     throw new Error('Invalid HomeRow backup file');
   }
-  await db.transaction('rw', db.supplies, db.bills, db.settings, async () => {
+  await db.transaction('rw', db.supplies, db.bills, db.dining, db.settings, async () => {
     await db.supplies.clear();
     await db.bills.clear();
+    await db.dining.clear();
     await db.settings.clear();
     if (payload.supplies?.length) await db.supplies.bulkAdd(payload.supplies);
     if (payload.bills?.length) await db.bills.bulkAdd(payload.bills);
+    if (payload.dining?.length) await db.dining.bulkAdd(payload.dining);
     if (payload.settings?.length) await db.settings.bulkPut(payload.settings);
   });
 }

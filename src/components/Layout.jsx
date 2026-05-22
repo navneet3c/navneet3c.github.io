@@ -1,3 +1,5 @@
+import { ActionButton } from './ActionButton.jsx';
+
 export function Layout({ title, modules, currentPath, onNavigate, children }) {
   const navModules = modules.filter((m) => m.nav);
 
@@ -7,15 +9,14 @@ export function Layout({ title, modules, currentPath, onNavigate, children }) {
         <h1>
           <span class="logo">🏠</span> {title}
         </h1>
-        <button
-          type="button"
+        <ActionButton
           class="btn btn-ghost"
           style="padding: 0.4rem 0.6rem; font-size: 1.1rem;"
+          label="Backup & settings"
           onClick={() => onNavigate('/backup')}
-          title="Backup & settings"
         >
           ☁️
-        </button>
+        </ActionButton>
       </header>
       <main class="app-main">{children}</main>
       <nav class="bottom-nav" aria-label="Main">

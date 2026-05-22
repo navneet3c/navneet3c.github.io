@@ -1,4 +1,5 @@
 import { SuppliesView } from '../modules/supplies/SuppliesView.jsx';
+import { DiningView } from '../modules/dining/DiningView.jsx';
 import { BillsView } from '../modules/bills/BillsView.jsx';
 import { AnalyticsView } from '../modules/analytics/AnalyticsView.jsx';
 import { BackupView } from '../modules/backup/BackupView.jsx';
@@ -23,6 +24,14 @@ export const MODULES = [
     icon: '📦',
     path: '/supplies',
     component: SuppliesView,
+    nav: true,
+  },
+  {
+    id: 'dining',
+    label: 'Dining',
+    icon: '🍽️',
+    path: '/dining',
+    component: DiningView,
     nav: true,
   },
   {

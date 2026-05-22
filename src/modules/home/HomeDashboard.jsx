@@ -1,26 +1,29 @@
 import { db } from '../../db/schema.js';
 import { useLiveQuery } from '../../core/store.js';
-import { analyzeSupplyPatterns, predictUpcomingBills } from '../../lib/patterns.js';
+import { fetchSupplyDashboardStats } from '../../db/suppliesQuery.js';
+import { predictUpcomingBills } from '../../lib/patterns.js';
 import { formatCategory } from '../../lib/categorize.js';
+import { formatRupee } from '../../lib/formatMoney.js';
 
 export function HomeDashboard({ onNavigate }) {
-  const { data: supplies = [] } = useLiveQuery(() => db.supplies.toArray(), []);
+  const { data: supplyStats = { count: 0, totalSpend: 0, dueSoon: [] } } = useLiveQuery(
+    () => fetchSupplyDashboardStats(7),
+    [],
+  );
   const { data: bills = [] } = useLiveQuery(() => db.bills.toArray(), []);
 
-  const dueSoon = analyzeSupplyPatterns(supplies, { horizonDays: 7 });
+  const dueSoon = supplyStats.dueSoon || [];
   const upcomingBills = predictUpcomingBills(bills, 14).slice(0, 5);
-
-  const totalSpend = supplies.reduce((s, i) => s + (Number(i.price) || 0), 0);
 
   return (
     <>
       <div class="stat-grid">
         <div class="stat-card">
-          <div class="stat-value">{supplies.length}</div>
+          <div class="stat-value">{supplyStats.count}</div>
           <div class="stat-label">Supply entries</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value">₹{totalSpend.toFixed(0)}</div>
+          <div class="stat-value">{formatRupee(supplyStats.totalSpend)}</div>
           <div class="stat-label">Tracked spend</div>
         </div>
         <div class="stat-card">
@@ -58,7 +61,12 @@ export function HomeDashboard({ onNavigate }) {
                 </span>
               </div>
             </div>
-            <button type="button" class="btn btn-primary" style="padding: 0.4rem 0.7rem; font-size: 0.75rem;" onClick={() => onNavigate?.('/supplies')}>
+            <button
+              type="button"
+              class="btn btn-primary"
+              style="padding: 0.4rem 0.7rem; font-size: 0.75rem;"
+              onClick={() => onNavigate?.('/supplies', { supplyKey: item.key })}
+            >
               Add
             </button>
           </div>
@@ -84,9 +92,7 @@ export function HomeDashboard({ onNavigate }) {
                   {b.dueDate} · {formatCategory(b.category)}
                 </div>
               </div>
-              <div class="item-meta" style="font-family: var(--mono); font-weight: 600;">
-                ₹{Number(b.amount).toFixed(0)}
-              </div>
+              <div class="item-meta item-price">{formatRupee(b.amount)}</div>
             </div>
           ))}
         </div>

@@ -1,36 +1,29 @@
 import { useState, useMemo, useEffect } from 'preact/hooks';
 import { db } from '../../db/schema.js';
-import {
-  fetchSuppliesPage,
-  fetchAllSuppliesLite,
-  countSupplies,
-} from '../../db/suppliesQuery.js';
+import { fetchDiningPage, fetchAllDiningLite, countDining } from '../../db/diningQuery.js';
 import { useLiveQuery } from '../../core/store.js';
-import { formatCategory } from '../../lib/categorize.js';
-import { useSupplyCategories } from '../../lib/categories.js';
+import { formatCategory, useDiningCategories } from '../../lib/categories.js';
 import { getCategoryStyle } from '../../lib/categoryColors.js';
 import {
-  buildSuggestionIndex,
-  searchItemSuggestions,
-  searchAllBrandSuggestions,
-  getSupplyHints,
-  emojiChoicesForItem,
-} from '../../lib/supplySuggestions.js';
+  buildDiningSuggestionIndex,
+  searchDiningNameSuggestions,
+  searchLocationSuggestions,
+  getDiningHints,
+  emojiChoicesForDining,
+} from '../../lib/diningSuggestions.js';
 import { CategorySelect } from '../../components/CategorySelect.jsx';
 import { CategoryAdd } from '../../components/CategoryAdd.jsx';
 import { CategoryChipFilter } from '../../components/CategoryChipFilter.jsx';
 import { AutocompleteField } from '../../components/AutocompleteField.jsx';
 import { InputRupee } from '../../components/InputRupee.jsx';
-import { EmojiPicker } from '../../components/EmojiPicker.jsx';
+import { formatRupee } from '../../lib/formatMoney.js';
+import { formatShortDate, joinSubline } from '../../lib/formatList.js';
+import { DateRangeToolbar } from '../../components/DateRangeToolbar.jsx';
 import { ActionButton } from '../../components/ActionButton.jsx';
 import { FormClearButton } from '../../components/FormClearButton.jsx';
 import { EditActions } from '../../components/EditActions.jsx';
 import { ListPageFooter } from '../../components/ListPageFooter.jsx';
 import { QuickAddHintsPreview } from '../../components/QuickAddHintsPreview.jsx';
-import { DateRangeToolbar } from '../../components/DateRangeToolbar.jsx';
-import { formatRupee } from '../../lib/formatMoney.js';
-import { formatShortDate, joinSubline } from '../../lib/formatList.js';
-import { normalizeText } from '../../lib/text.js';
 import {
   FALLBACK_CATEGORY,
   DEFAULT_EMOJI,
@@ -40,28 +33,26 @@ import {
 } from '../../lib/constants.js';
 import { useDateRangeFilter } from '../../lib/useDateRangeFilter.js';
 import { useListPagination } from '../../lib/useListPagination.js';
-import { consumePendingSupplyPrefill, subscribeSupplyPrefill } from '../../lib/navState.js';
 
 function fillFromProfile(profile, setters) {
   const latest = profile.latest;
   setters.setName(latest.name);
-  setters.setBrand(latest.brand || '');
+  setters.setLocation(latest.location || '');
   setters.setCategory(latest.category || '');
   setters.setCategoryLocked(true);
+  setters.setLocationLocked(true);
   setters.setEmojiOverride(latest.emoji || null);
-  setters.setSize(latest.size || '');
-  setters.setSizeLocked(true);
-  if (latest.price != null) {
-    setters.setPrice(String(latest.price));
-    setters.setPriceLocked(true);
+  if (latest.cost != null) {
+    setters.setCost(String(latest.cost));
+    setters.setCostLocked(true);
   }
 }
 
-function supplySubline(item) {
-  return joinSubline([formatCategory(item.category), item.size, formatShortDate(item.purchasedAt)]);
+function diningSubline(item) {
+  return joinSubline([formatCategory(item.category), item.location, formatShortDate(item.spentAt)]);
 }
 
-export function SuppliesView() {
+export function DiningView() {
   const [filter, setFilter] = useState('all');
   const {
     datePreset,
@@ -75,11 +66,11 @@ export function SuppliesView() {
   } = useDateRangeFilter(DEFAULT_LIST_DATE_PRESET);
   const { listLimit, loadMore } = useListPagination([filter, datePreset, customFrom, customTo]);
 
-  const { categories, addCategory, removeCategory } = useSupplyCategories();
+  const { categories, addCategory, removeCategory } = useDiningCategories();
 
   const { data: listItems = [] } = useLiveQuery(
     () =>
-      fetchSuppliesPage({
+      fetchDiningPage({
         category: filter,
         limit: listLimit,
         from: dateRange.from,
@@ -89,51 +80,38 @@ export function SuppliesView() {
   );
 
   const { data: listTotal = 0 } = useLiveQuery(
-    () => countSupplies({ category: filter, from: dateRange.from, to: dateRange.to }),
+    () => countDining({ category: filter, from: dateRange.from, to: dateRange.to }),
     [filter, dateRange.from, dateRange.to],
   );
 
-  const { data: allLite = [] } = useLiveQuery(() => fetchAllSuppliesLite(), []);
+  const { data: allLite = [] } = useLiveQuery(() => fetchAllDiningLite(), []);
 
   const [name, setName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [showDetails, setShowDetails] = useState(false);
+  const [location, setLocation] = useState('');
   const [showEmojiPick, setShowEmojiPick] = useState(false);
-  const [price, setPrice] = useState('');
-  const [size, setSize] = useState('');
+  const [cost, setCost] = useState('');
   const [notes, setNotes] = useState('');
   const [category, setCategory] = useState('');
   const [emojiOverride, setEmojiOverride] = useState(null);
-  const [imageFile, setImageFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [categoryLocked, setCategoryLocked] = useState(false);
-  const [priceLocked, setPriceLocked] = useState(false);
-  const [sizeLocked, setSizeLocked] = useState(false);
-  const [restockPrefillKey, setRestockPrefillKey] = useState(null);
+  const [costLocked, setCostLocked] = useState(false);
+  const [locationLocked, setLocationLocked] = useState(false);
 
-  const suggestionIndex = useMemo(() => buildSuggestionIndex(allLite), [allLite]);
-
-  useEffect(() => {
-    const pullPending = () => {
-      const key = consumePendingSupplyPrefill();
-      if (key) setRestockPrefillKey(key);
-    };
-    pullPending();
-    return subscribeSupplyPrefill(pullPending);
-  }, []);
+  const suggestionIndex = useMemo(() => buildDiningSuggestionIndex(allLite), [allLite]);
 
   const hints = useMemo(
-    () => getSupplyHints(suggestionIndex, name, brand, size),
-    [suggestionIndex, name, brand, size],
+    () => getDiningHints(suggestionIndex, name, location),
+    [suggestionIndex, name, location],
   );
 
   const effectiveCategory = category || hints.category || FALLBACK_CATEGORY;
-  const effectiveEmoji = emojiOverride ?? hints.emoji ?? DEFAULT_EMOJI.supply;
+  const effectiveEmoji = emojiOverride ?? hints.emoji ?? DEFAULT_EMOJI.dining;
 
   const emojiChoices = useMemo(() => {
-    const picks = emojiChoicesForItem(name, brand, effectiveCategory);
+    const picks = emojiChoicesForDining(name, location, effectiveCategory);
     const seen = new Set();
     const out = [];
     for (const e of [effectiveEmoji, ...picks]) {
@@ -143,81 +121,69 @@ export function SuppliesView() {
       }
     }
     return out;
-  }, [name, brand, effectiveCategory, effectiveEmoji]);
+  }, [name, location, effectiveCategory, effectiveEmoji]);
 
   const nameSuggestions = useMemo(() => {
     const matches = name.trim()
-      ? searchItemSuggestions(suggestionIndex, name, SUGGESTION_MATCH_LIMIT)
+      ? searchDiningNameSuggestions(suggestionIndex, name, SUGGESTION_MATCH_LIMIT)
       : suggestionIndex.items.slice(0, SUGGESTION_IDLE_LIMIT);
     return matches.map((item) => ({
       id: item.key,
       label: item.label,
-      meta: [item.profile.latest.size, formatCategory(item.profile.latest.category)]
+      meta: [item.profile.latest.location, formatCategory(item.profile.latest.category)]
         .filter(Boolean)
         .join(' · '),
       profile: item.profile,
     }));
   }, [name, suggestionIndex]);
 
-  const brandSuggestions = useMemo(
+  const locationSuggestions = useMemo(
     () =>
-      searchAllBrandSuggestions(suggestionIndex, brand, SUGGESTION_MATCH_LIMIT).map((row, i) => ({
-        id: `${normalizeText(row.brand)}-${i}`,
-        label: row.brand,
-        meta: row.lastItemName || '',
-        brand: row.brand,
+      searchLocationSuggestions(suggestionIndex, location, SUGGESTION_MATCH_LIMIT).map((row, i) => ({
+        id: `${row.location}-${i}`,
+        label: row.location,
+        meta: row.lastName || '',
+        location: row.location,
       })),
-    [brand, suggestionIndex],
+    [location, suggestionIndex],
   );
 
   useEffect(() => {
     if (!name.trim()) return;
     if (!categoryLocked) setCategory(hints.category);
-    if (!sizeLocked && hints.size) setSize(hints.size);
-  }, [name, brand, hints.category, hints.size, categoryLocked, sizeLocked]);
+    if (!locationLocked && hints.location) setLocation(hints.location);
+  }, [name, location, hints.category, hints.location, categoryLocked, locationLocked]);
 
   useEffect(() => {
-    if (!name.trim() || priceLocked) return;
-    if (hints.price != null) setPrice(String(Math.round(hints.price)));
-  }, [name, brand, size, hints.price, priceLocked]);
+    if (!name.trim() || costLocked) return;
+    if (hints.cost != null) setCost(String(Math.round(hints.cost)));
+  }, [name, location, hints.cost, costLocked]);
 
   const hasMore = listItems.length < listTotal;
 
   const resetForm = () => {
     setName('');
-    setBrand('');
-    setPrice('');
-    setSize('');
+    setLocation('');
+    setCost('');
     setNotes('');
     setCategory('');
     setEmojiOverride(null);
-    setImageFile(null);
-    setShowDetails(false);
     setShowEmojiPick(false);
     setCategoryLocked(false);
-    setPriceLocked(false);
-    setSizeLocked(false);
+    setCostLocked(false);
+    setLocationLocked(false);
   };
 
   const formSetters = {
     setName,
-    setBrand,
+    setLocation,
     setCategory,
     setCategoryLocked,
     setEmojiOverride,
-    setSize,
-    setSizeLocked,
-    setPrice,
-    setPriceLocked,
+    setCost,
+    setCostLocked,
+    setLocationLocked,
   };
-
-  useEffect(() => {
-    if (!restockPrefillKey) return;
-    const profile = suggestionIndex.byKey.get(restockPrefillKey);
-    if (!profile) return;
-    fillFromProfile(profile, formSetters);
-    setRestockPrefillKey(null);
-  }, [restockPrefillKey, suggestionIndex]);
 
   const handleRemoveCategory = async (id) => {
     await removeCategory(id);
@@ -237,19 +203,14 @@ export function SuppliesView() {
     setSaving(true);
     try {
       const now = new Date().toISOString();
-      let imageBlob = null;
-      if (imageFile) imageBlob = imageFile;
-
-      await db.supplies.add({
+      await db.dining.add({
         name: name.trim(),
-        brand: brand.trim() || undefined,
-        price: price ? parseFloat(price) : undefined,
-        size: size.trim() || undefined,
+        location: location.trim() || undefined,
+        cost: cost ? parseFloat(cost) : undefined,
         notes: notes.trim() || undefined,
         category: effectiveCategory,
         emoji: effectiveEmoji,
-        imageBlob,
-        purchasedAt: now,
+        spentAt: now,
         createdAt: now,
       });
       resetForm();
@@ -259,7 +220,7 @@ export function SuppliesView() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !showDetails) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleQuickAdd();
     }
@@ -269,36 +230,35 @@ export function SuppliesView() {
     setCategory(hints.category);
     setCategoryLocked(true);
     setEmojiOverride(hints.emoji);
-    if (hints.size) {
-      setSize(hints.size);
-      setSizeLocked(true);
+    if (hints.location) {
+      setLocation(hints.location);
+      setLocationLocked(true);
     }
-    if (hints.price != null) {
-      setPrice(String(Math.round(hints.price)));
-      setPriceLocked(true);
+    if (hints.cost != null) {
+      setCost(String(Math.round(hints.cost)));
+      setCostLocked(true);
     }
   };
 
   const updateItem = async (id, patch) => {
     const row = { ...patch };
-    if ('price' in patch) {
-      const p = patch.price;
-      row.price = p === '' || p == null ? undefined : parseFloat(p);
-      if (row.price != null && Number.isNaN(row.price)) return;
+    if ('cost' in patch) {
+      const p = patch.cost;
+      row.cost = p === '' || p == null ? undefined : parseFloat(p);
+      if (row.cost != null && Number.isNaN(row.cost)) return;
     }
-    if ('size' in patch) row.size = patch.size?.trim() || undefined;
+    if ('location' in patch) row.location = patch.location?.trim() || undefined;
     if ('name' in patch) row.name = patch.name?.trim();
-    if ('brand' in patch) row.brand = patch.brand?.trim() || undefined;
-    await db.supplies.update(id, row);
+    await db.dining.update(id, row);
   };
 
   const deleteItem = async (id) => {
-    if (confirm('Remove this supply entry?')) {
+    if (confirm('Remove this dining entry?')) {
       if (editingId === id) {
         setEditingId(null);
         setEditDraft(null);
       }
-      await db.supplies.delete(id);
+      await db.dining.delete(id);
     }
   };
 
@@ -306,10 +266,9 @@ export function SuppliesView() {
     setEditingId(item.id);
     setEditDraft({
       name: item.name,
-      brand: item.brand || '',
-      category: item.category || FALLBACK_CATEGORY,
-      price: item.price ?? '',
-      size: item.size || '',
+      location: item.location || '',
+      category: item.category || 'other',
+      cost: item.cost ?? '',
     });
   };
 
@@ -322,10 +281,9 @@ export function SuppliesView() {
     if (!editingId || !editDraft?.name?.trim()) return;
     await updateItem(editingId, {
       name: editDraft.name,
-      brand: editDraft.brand,
+      location: editDraft.location,
       category: editDraft.category,
-      price: editDraft.price,
-      size: editDraft.size,
+      cost: editDraft.cost,
     });
     cancelEdit();
   };
@@ -336,20 +294,19 @@ export function SuppliesView() {
         <div class="quick-add-row quick-add-row-name">
           <ActionButton
             class={`emoji-lead action-btn-emoji${showEmojiPick ? ' emoji-lead-open' : ''}`}
-            label="Choose emoji (auto when empty)"
+            label="Choose emoji"
             onClick={() => setShowEmojiPick(!showEmojiPick)}
           >
             {effectiveEmoji}
           </ActionButton>
           <AutocompleteField
             value={name}
-            placeholder="Item name — press Enter to save"
+            placeholder="What did you eat? — Enter to save"
             suggestions={nameSuggestions}
             onInput={(v) => {
               setName(v);
               setCategoryLocked(false);
-              setSizeLocked(false);
-              setPriceLocked(false);
+              setCostLocked(false);
             }}
             onSelect={(s) => fillFromProfile(s.profile, formSetters)}
             onKeyDown={handleKeyDown}
@@ -360,24 +317,43 @@ export function SuppliesView() {
           <FormClearButton onClick={resetForm} disabled={saving} />
         </div>
         {showEmojiPick && (
-          <EmojiPicker
-            selected={effectiveEmoji}
-            quickPicks={emojiChoices}
-            onSelect={(e) => setEmojiOverride(e)}
-            onClose={() => setShowEmojiPick(false)}
-          />
+          <div class="emoji-picker-strip">
+            {emojiChoices.map((e) => (
+              <ActionButton
+                key={e}
+                class={`emoji-pick${effectiveEmoji === e ? ' emoji-pick-active' : ''}`}
+                label={`Select ${e}`}
+                onClick={() => {
+                  setEmojiOverride(e);
+                  setShowEmojiPick(false);
+                }}
+              >
+                {e}
+              </ActionButton>
+            ))}
+            <ActionButton
+              class="emoji-pick emoji-pick-auto"
+              label="Use automatic emoji"
+              onClick={() => {
+                setEmojiOverride(null);
+                setShowEmojiPick(false);
+              }}
+            >
+              Auto
+            </ActionButton>
+          </div>
         )}
         <div class="quick-add-row" style="margin-top: 0.5rem;">
           <AutocompleteField
-            value={brand}
-            placeholder="Brand (optional)"
-            suggestions={brandSuggestions}
+            value={location}
+            placeholder="Location (restaurant, store…)"
+            suggestions={locationSuggestions}
             onInput={(v) => {
-              setBrand(v);
+              setLocation(v);
               setCategoryLocked(false);
-              setPriceLocked(false);
+              setCostLocked(false);
             }}
-            onSelect={(s) => setBrand(s.brand)}
+            onSelect={(s) => setLocation(s.location)}
             onKeyDown={handleKeyDown}
           />
         </div>
@@ -393,21 +369,11 @@ export function SuppliesView() {
           />
           <InputRupee
             class="inline-field"
-            placeholder="Price"
-            value={price}
+            placeholder="Cost"
+            value={cost}
             onInput={(e) => {
-              setPrice(e.target.value);
-              setPriceLocked(true);
-            }}
-          />
-          <input
-            class="inline-field"
-            type="text"
-            placeholder="Weight / size"
-            value={size}
-            onInput={(e) => {
-              setSize(e.target.value);
-              setSizeLocked(true);
+              setCost(e.target.value);
+              setCostLocked(true);
             }}
           />
         </div>
@@ -416,8 +382,8 @@ export function SuppliesView() {
             {hints.fromHistory ? (
               <>
                 From history: <strong>{formatCategory(hints.category)}</strong>
-                {hints.size ? ` · ${hints.size}` : ''}
-                {hints.price != null ? ` · ${formatRupee(hints.price)}` : ''}
+                {hints.location ? ` · ${hints.location}` : ''}
+                {hints.cost != null ? ` · ${formatRupee(hints.cost)}` : ''}
               </>
             ) : (
               <>
@@ -426,26 +392,14 @@ export function SuppliesView() {
             )}
           </QuickAddHintsPreview>
         )}
-        <button
-          type="button"
-          class="btn btn-ghost"
-          style="width: 100%; margin-top: 0.5rem; font-size: 0.8rem;"
-          onClick={() => setShowDetails(!showDetails)}
-        >
-          {showDetails ? '▲ Hide extras' : '▼ Photo, notes'}
-        </button>
-        {showDetails && (
-          <div class="details-panel">
-            <div class="field">
-              <label>Photo</label>
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => setImageFile(e.target.files?.[0] || null)} />
-            </div>
-            <div class="field">
-              <label>Notes</label>
-              <textarea rows={2} value={notes} onInput={(e) => setNotes(e.target.value)} placeholder="Store, expiry, etc." />
-            </div>
-          </div>
-        )}
+        <div class="field" style="margin-top: 0.5rem;">
+          <textarea
+            rows={2}
+            value={notes}
+            onInput={(e) => setNotes(e.target.value)}
+            placeholder="Notes (optional)"
+          />
+        </div>
       </form>
 
       <DateRangeToolbar
@@ -463,18 +417,18 @@ export function SuppliesView() {
 
       {listTotal === 0 ? (
         <div class="empty-state">
-          <div class="emoji">{DEFAULT_EMOJI.supply}</div>
+          <div class="emoji">{DEFAULT_EMOJI.dining}</div>
           <p>
             {datePreset !== 'all' || filter !== 'all'
-              ? 'No supplies in this period or category. Try a wider date range.'
-              : 'No supplies yet. Type an item name above and press Enter.'}
+              ? 'No dining entries in this period or category.'
+              : 'No meals logged yet. Add what you ate above.'}
           </p>
         </div>
       ) : (
         <div class="list list-supplies">
           {listItems.map((item) => {
             const isEditing = editingId === item.id && editDraft;
-            const catStyle = getCategoryStyle(item.category);
+            const catStyle = getCategoryStyle(item.category, 'dining');
             return (
               <div
                 key={item.id}
@@ -491,9 +445,9 @@ export function SuppliesView() {
                       />
                       <input
                         type="text"
-                        placeholder="Brand"
-                        value={editDraft.brand}
-                        onInput={(e) => setEditDraft({ ...editDraft, brand: e.target.value })}
+                        placeholder="Location"
+                        value={editDraft.location}
+                        onInput={(e) => setEditDraft({ ...editDraft, location: e.target.value })}
                       />
                     </div>
                     <div class="quick-add-fields">
@@ -505,15 +459,8 @@ export function SuppliesView() {
                       />
                       <InputRupee
                         class="inline-field"
-                        value={editDraft.price}
-                        onInput={(e) => setEditDraft({ ...editDraft, price: e.target.value })}
-                      />
-                      <input
-                        class="inline-field"
-                        type="text"
-                        placeholder="Size"
-                        value={editDraft.size}
-                        onInput={(e) => setEditDraft({ ...editDraft, size: e.target.value })}
+                        value={editDraft.cost}
+                        onInput={(e) => setEditDraft({ ...editDraft, cost: e.target.value })}
                       />
                     </div>
                     <EditActions onSave={saveEdit} onCancel={cancelEdit} />
@@ -523,22 +470,15 @@ export function SuppliesView() {
                     <div class="item-body">
                       <div class="item-title">
                         <span class="item-emoji-inline" aria-hidden="true">
-                          {item.emoji || DEFAULT_EMOJI.supply}
+                          {item.emoji || DEFAULT_EMOJI.dining}
                         </span>
                         {item.name}
-                        {item.brand ? <span class="item-brand"> · {item.brand}</span> : ''}
                       </div>
-                      <div class="item-sub item-sub-compact">{supplySubline(item)}</div>
+                      <div class="item-sub item-sub-compact">{diningSubline(item)}</div>
                     </div>
                     <div class="item-meta item-meta-compact">
-                      {item.price != null && (
-                        <span class="item-price">{formatRupee(item.price)}</span>
-                      )}
-                      {item.hasImage && (
-                        <span class="chip action-hint" style="font-size: 0.6rem; padding: 0.1rem 0.3rem;">
-                          📷
-                          <span class="action-btn-tip">Has photo</span>
-                        </span>
+                      {item.cost != null && (
+                        <span class="item-price">{formatRupee(item.cost)}</span>
                       )}
                       <div class="item-actions">
                         <ActionButton tight label="Edit" onClick={() => startEdit(item)}>

@@ -7,10 +7,29 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function groupKey(item) {
-  const name = (item.name || '').toLowerCase().trim();
-  const brand = (item.brand || '').toLowerCase().trim();
-  return brand ? `${name}|${brand}` : name;
+export function pairGroupKey(primary, secondary = '') {
+  const a = (primary || '').toLowerCase().trim();
+  const b = (secondary || '').toLowerCase().trim();
+  return b ? `${a}|${b}` : a;
+}
+
+export function groupKey(item) {
+  return pairGroupKey(item.name, item.brand);
+}
+
+const MAX_PURCHASES_PER_ITEM = 32;
+
+function pushPurchase(group, item) {
+  const t = new Date(item.purchasedAt).getTime();
+  if (group.length < MAX_PURCHASES_PER_ITEM) {
+    group.push({ item, t });
+    return;
+  }
+  let minIdx = 0;
+  for (let i = 1; i < group.length; i++) {
+    if (group[i].t < group[minIdx].t) minIdx = i;
+  }
+  if (t > group[minIdx].t) group[minIdx] = { item, t };
 }
 
 export function analyzeSupplyPatterns(supplies, { horizonDays = 7 } = {}) {
@@ -20,22 +39,21 @@ export function analyzeSupplyPatterns(supplies, { horizonDays = 7 } = {}) {
     const key = groupKey(s);
     if (!key) continue;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
+    pushPurchase(groups.get(key), s);
   }
 
   const now = Date.now();
   const horizon = horizonDays * MS_DAY;
   const suggestions = [];
 
-  for (const [, items] of groups) {
-    items.sort((a, b) => new Date(b.purchasedAt) - new Date(a.purchasedAt));
-    if (items.length < 2) continue;
+  for (const [, entries] of groups) {
+    if (entries.length < 2) continue;
+    entries.sort((a, b) => b.t - a.t);
+    const items = entries.map((e) => e.item);
 
     const intervals = [];
-    for (let i = 0; i < items.length - 1; i++) {
-      const a = new Date(items[i].purchasedAt).getTime();
-      const b = new Date(items[i + 1].purchasedAt).getTime();
-      const days = (a - b) / MS_DAY;
+    for (let i = 0; i < entries.length - 1; i++) {
+      const days = (entries[i].t - entries[i + 1].t) / MS_DAY;
       if (days > 0 && days < 365) intervals.push(days);
     }
 
@@ -72,9 +90,13 @@ export function frequentItems(supplies, limit = 8) {
   for (const s of supplies) {
     const key = groupKey(s);
     if (!key) continue;
-    const cur = counts.get(key) || { count: 0, item: s };
+    const t = new Date(s.purchasedAt).getTime();
+    const cur = counts.get(key) || { count: 0, item: s, t: 0 };
     cur.count += 1;
-    if (new Date(s.purchasedAt) > new Date(cur.item.purchasedAt)) cur.item = s;
+    if (t >= cur.t) {
+      cur.item = s;
+      cur.t = t;
+    }
     counts.set(key, cur);
   }
   return [...counts.values()]
@@ -83,21 +105,42 @@ export function frequentItems(supplies, limit = 8) {
     .map(({ count, item }) => ({ ...item, purchaseCount: count }));
 }
 
-export function spendByCategory(supplies) {
+export function filterByDateRange(items, from, to, dateField = 'purchasedAt') {
+  if (!from && !to) return items;
+  return items.filter((item) => {
+    const d = item[dateField];
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  });
+}
+
+export function spendByCategory(
+  items,
+  { amountField = 'price', categoryField = 'category' } = {},
+) {
   const map = new Map();
-  for (const s of supplies) {
-    if (!s.price || s.price <= 0) continue;
-    const cat = s.category || 'other';
-    map.set(cat, (map.get(cat) || 0) + Number(s.price));
+  for (const s of items) {
+    const amount = Number(s[amountField]);
+    if (!amount || amount <= 0) continue;
+    const cat = s[categoryField] || 'other';
+    map.set(cat, (map.get(cat) || 0) + amount);
   }
   return [...map.entries()].map(([category, total]) => ({ category, total }));
 }
 
-export function spendOverTime(supplies, granularity = 'week') {
+export function spendOverTime(
+  items,
+  granularity = 'week',
+  { amountField = 'price', dateField = 'purchasedAt' } = {},
+) {
   const map = new Map();
-  for (const s of supplies) {
-    if (!s.price || s.price <= 0) continue;
-    const d = new Date(s.purchasedAt);
+  for (const s of items) {
+    const amount = Number(s[amountField]);
+    if (!amount || amount <= 0) continue;
+    const d = new Date(s[dateField]);
+    if (Number.isNaN(d.getTime())) continue;
     let key;
     if (granularity === 'month') {
       key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -106,7 +149,7 @@ export function spendOverTime(supplies, granularity = 'week') {
       start.setDate(d.getDate() - d.getDay());
       key = start.toISOString().slice(0, 10);
     }
-    map.set(key, (map.get(key) || 0) + Number(s.price));
+    map.set(key, (map.get(key) || 0) + amount);
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -124,7 +167,7 @@ export function predictUpcomingBills(bills, daysAhead = 45) {
   for (const bill of bills.filter((b) => b.active !== false)) {
     let due = bill.nextDue ? new Date(bill.nextDue) : null;
     if (!due && bill.lastPaid) {
-      due = advanceDue(new Date(bill.lastPaid), bill.frequency);
+      due = advanceBillDue(new Date(bill.lastPaid), bill.frequency);
     }
     if (!due) due = new Date(now);
 
@@ -136,14 +179,14 @@ export function predictUpcomingBills(bills, daysAhead = 45) {
           daysUntil: Math.round((due - now) / MS_DAY),
         });
       }
-      due = advanceDue(due, bill.frequency);
+      due = advanceBillDue(due, bill.frequency);
     }
   }
 
   return upcoming.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
-function advanceDue(from, frequency) {
+export function advanceBillDue(from, frequency) {
   const d = new Date(from);
   switch (frequency) {
     case 'weekly':
